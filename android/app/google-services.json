@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "74416417574",
+    "project_id": "attendance-guru-97a44",
+    "storage_bucket": "attendance-guru-97a44.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:74416417574:android:766b2586814ce69fec6fe7",
+        "android_client_info": {
+          "package_name": "com.example.sih_new"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDO1Bml4EHodWN18t_A-t-q-_ZR01MV2rI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
