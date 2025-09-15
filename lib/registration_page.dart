@@ -17,6 +17,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _teacherSubjectsController = TextEditingController();
+  final _studentIdController = TextEditingController(); // New controller for student ID
 
   // Firebase service instances
   final _auth = FirebaseAuth.instance;
@@ -158,6 +159,10 @@ class _RegistrationPageState extends State<RegistrationPage> {
 
   /// Creates a document for the new student in the 'student' collection.
   Future<void> _registerStudent({required String name, required String email, required String uid}) async {
+    if (_studentIdController.text.isEmpty) {
+      throw Exception('Student ID/Roll Number is required');
+    }
+
     // Create subjects map with explicit typing
     final Map<String, dynamic> subjectsMap = Map<String, dynamic>.fromEntries(
       _selectedStudentSubjects.asMap().entries.map(
@@ -169,7 +174,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
     final Map<String, dynamic> studentData = Map<String, dynamic>.from({
       'name': name,
       'email': email,
-      'id': uid,
+      'id': _studentIdController.text.trim(), // Use student ID instead of uid
     })..addAll(subjectsMap);
 
     await _firestore.collection('student').doc(name).set(studentData);
@@ -204,8 +209,15 @@ class _RegistrationPageState extends State<RegistrationPage> {
 
     for (String subject in subjectsList) {
       final DocumentReference subjectRef = _firestore.collection('subjects').doc(subject);
-      // Set an explicitly typed empty map so Firestore doesn't return a Map<dynamic, dynamic> later:
-      batch.set(subjectRef, <String, dynamic>{});
+      
+      // Set an empty document for the subject with explicit Map<String, dynamic> type
+      final Map<String, dynamic> emptySubjectData = Map<String, dynamic>.from({});
+      batch.set(subjectRef, emptySubjectData);
+
+      // Create the dates collection with explicit Map<String, dynamic> type
+      final DocumentReference datesDoc = subjectRef.collection('dates').doc('placeholder');
+      final Map<String, dynamic> emptyDatesData = Map<String, dynamic>.from({});
+      batch.set(datesDoc, emptyDatesData);
     }
 
     await batch.commit();
@@ -217,6 +229,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
     _emailController.dispose();
     _passwordController.dispose();
     _teacherSubjectsController.dispose();
+    _studentIdController.dispose();
     super.dispose();
   }
 
@@ -255,11 +268,24 @@ class _RegistrationPageState extends State<RegistrationPage> {
                 controller: _nameController,
                 decoration: const InputDecoration(
                   labelText: 'Name',
-                  hintText: 'This will be used as your ID',
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 12),
+              if (_selectedRole == 'Student')
+                Column(
+                  children: [
+                    TextField(
+                      controller: _studentIdController,
+                      decoration: const InputDecoration(
+                        labelText: 'Student ID/Roll Number',
+                        hintText: 'This will be used as your ID',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ),
               TextField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
