@@ -235,48 +235,49 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
           ),
         ],
       ),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_isLoading)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 24.0),
-                child: CircularProgressIndicator(),
-              )
-            else if (_userName != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 24.0),
-                child: Text(
-                  'Welcome, $_userName',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
-            if (!_isLoading && _userName != null)
-              _isTeacher
-                ? ElevatedButton.icon(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const TeacherScreen()),
-                    ),
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text("Start Scanning"),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                    ),
-                  )
-                : ElevatedButton.icon(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const StudentScreen()),
-                    ),
-                    icon: const Icon(Icons.bluetooth_connected),
-                    label: const Text("Start Advertising"),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                    ),
-            ),
-          ],
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Center(
+            child: _isLoading
+                ? const CircularProgressIndicator()
+                : _userName == null
+                    ? const Text('No user information found')
+                    : Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Welcome, $_userName',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 24),
+                          if (_isTeacher)
+                            ElevatedButton.icon(
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const TeacherScreen()),
+                              ),
+                              icon: const Icon(Icons.qr_code_scanner),
+                              label: const Text("Start Scanning"),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                              ),
+                            )
+                          else
+                            ElevatedButton.icon(
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const StudentScreen()),
+                              ),
+                              icon: const Icon(Icons.bluetooth_connected),
+                              label: const Text("Start Advertising"),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                              ),
+                            ),
+                        ],
+                      ),
+          ),
         ),
       ),
     );
