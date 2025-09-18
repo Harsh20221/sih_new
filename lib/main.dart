@@ -162,7 +162,7 @@ class AuthGate extends StatelessWidget {
 // --- MODIFIED RoleSelectionScreen WIDGET ---
 class RoleSelectionScreen extends StatefulWidget {
   const RoleSelectionScreen({super.key});
-  
+
   @override
   State<RoleSelectionScreen> createState() => _RoleSelectionScreenState();
 }
@@ -451,7 +451,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (ctx, i) {
                 final d = deviceList[i];
-                final adv = _advInfo[d.id]!;
+                // final adv = _advInfo[d.id]!;
                 // Skip showing verified devices in main list (already in top list)
                 if (_verifiedIds.contains(d.id)) return const SizedBox.shrink();
                 return _deviceTile(d);
@@ -472,199 +472,210 @@ class StudentScreen extends StatefulWidget {
 }
 
 class _StudentScreenState extends State<StudentScreen> {
-  final String _studentId = _uuidGen.v4().substring(0, 6);
-  final TextEditingController _nameController = TextEditingController(
-    text: 'Student-${_shortId()}',
-  );
-  final TextEditingController _classController = TextEditingController(
-    text: TARGET_CLASS_ID,
-  );
+  // Controllers to display the fetched information in the UI
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _idController = TextEditingController();
 
+  bool _isLoading = true;
   bool _advertising = false;
   String _currentStrategy = '';
 
-  static String _shortId() {
-    return _uuidGen.v4().substring(0, 6);
-  }
-
-
-   @override
+  @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _fetchStudentInfo();
       bool granted = await requestBlePermissions();
-      if (granted) {
+      if (granted && mounted) {
         await _checkDeviceCapability();
       }
     });
   }
-Future<void> _checkDeviceCapability() async {
+
+  /// Fetches student's name and roll number from Firestore.
+  Future<void> _fetchStudentInfo() async {
+    setState(() => _isLoading = true);
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null || user.email == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      final studentQuery = await FirebaseFirestore.instance
+          .collection('student')
+          .where('email', isEqualTo: user.email)
+          .limit(1)
+          .get();
+
+      if (studentQuery.docs.isNotEmpty) {
+        final studentData = studentQuery.docs.first.data();
+        setState(() {
+          _nameController.text = studentData['name'] as String? ?? 'N/A';
+          _idController.text = studentData['id'] as String? ?? 'N/A';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching student info: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _checkDeviceCapability() async {
     try {
       final isSupported = await _peripheral.isSupported;
       debugPrint('📱 Device BLE advertising support: $isSupported');
-      
-      if (!isSupported) {
-        setState(() => _advertising = false);
-        if (mounted) {
-          showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('BLE Advertising Not Supported'),
-              content: const Text(
-                'This device does not support BLE advertising. '
-                'Other students with compatible devices will not be able to detect you.',
+
+      if (!isSupported && mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('BLE Advertising Not Supported'),
+            content: const Text(
+                'This device reports that it does not support BLE advertising. We will attempt to start it anyway.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
-          );
-        }
-        return;
+            ],
+          ),
+        );
       }
-      
-      // Device supports BLE, try advertising
-      await _startAdvertising();
     } catch (e) {
       debugPrint('❌ Error checking BLE capability: $e');
-      await _startAdvertising(); // Try anyway
     }
   }
+
   Future<void> _startAdvertising() async {
-    final classId = _classController.text.trim();
-    final displayName = _nameController.text.trim();
-    
-    // Try multiple advertising strategies
-    await _tryAdvertisingStrategies(classId, displayName);
-  }
+    if (_advertising) return;
 
-  Future<void> _tryAdvertisingStrategies(String classId, String displayName) async {
-    
-    // Strategy : Simple manufacturer data only
-    if (await _trySimpleManufacturerData(classId)) return;
-    
-    // All strategies failed
-    debugPrint('❌ All advertising strategies failed');
-    setState(() {
-      _advertising = false;
-      _currentStrategy = 'Failed';
-    });
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('BLE advertising not supported on this device'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+    final studentId = _idController.text.trim();
+    if (studentId.isEmpty || studentId == 'N/A') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cannot advertise without a valid ID.')),
+        );
+      }
+      return;
     }
-  }
 
+    setState(() {
+      _advertising = true;
+      _currentStrategy = 'Starting...';
+    });
 
-  Future<bool> _trySimpleManufacturerData(String classId) async {
     try {
-      debugPrint('🔄 Trying simple manufacturer data...');
-      //bytes should be less than 20bytes i.e. bytes.length < 20
-      final payload = 'ATS:$classId';
+      final payload = 'ATS:$studentId';
       final bytes = Uint8List.fromList(utf8.encode(payload));
-      
+
+      // Simplest possible advertising packet
       final advertiseData = AdvertiseData(
-        serviceUuid: "0000180a-0000-1000-8000-00805f9b34fb",
-        serviceDataUuid: "0000180a-0000-1000-8000-00805f9b34fd",
-        serviceData: bytes,
-        // localName: payload,
-        includeDeviceName: false,
+        manufacturerId: 0x004C, // Apple's ID, often works as a default
+        manufacturerData: bytes,
       );
 
-      final advertiseSetParameters = AdvertiseSetParameters(
-        connectable: false,
-        legacyMode: true,
-        scannable: false,
-        includeTxPowerLevel: false,
-      );
+      await _peripheral.stop();
+      await _peripheral.start(advertiseData: advertiseData);
 
-      await _peripheral.stop(); // Stop any previous advertising
-      await Future.delayed(Duration(milliseconds: 500));
-      
-      await _peripheral.start(
-        advertiseData: advertiseData,
-        advertiseSetParameters: advertiseSetParameters,
-      );
-      
-      debugPrint('✅ Simple manufacturer data advertising started');
-      setState(() {
-        _advertising = true;
-        _currentStrategy = 'Simple Data';
-      });
-      return true;
+      debugPrint('✅ Advertising started successfully.');
+      if (mounted) {
+        setState(() {
+          _currentStrategy = 'Manufacturer Data';
+        });
+      }
     } catch (e) {
-      debugPrint('❌ Simple manufacturer data failed: $e');
-      return false;
+      debugPrint('❌ Failed to start advertising: $e');
+      if (mounted) {
+        setState(() {
+          _advertising = false;
+          _currentStrategy = 'Failed';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to start advertising: $e')),
+        );
+      }
     }
   }
 
   Future<void> _stopAdvertising() async {
     try {
       await _peripheral.stop();
+      debugPrint('⏹️ Advertising stopped.');
     } catch (e) {
       debugPrint('Stop advertise error: $e');
     } finally {
-      setState(() {
-        _advertising = false;
-        _currentStrategy = '';
-      });
+      if (mounted) {
+        setState(() {
+          _advertising = false;
+          _currentStrategy = '';
+        });
+      }
     }
+  }
+
+  @override
+  void dispose() {
+    _stopAdvertising();
+    _nameController.dispose();
+    _idController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Student — Advertising')),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            TextField(
-              controller: _nameController,
-              decoration: const InputDecoration(labelText: 'Your name'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _classController,
-              decoration: const InputDecoration(labelText: 'Class ID'),
-            ),
-            const SizedBox(height: 12),
-            
-            Row(
-              children: [
-                ElevatedButton(
-                  onPressed: _advertising ? null : _startAdvertising,
-                  child: Text(
-                    _advertising ? 'Advertising...' : 'Start Advertising',
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _nameController,
+                    readOnly: true,
+                    decoration: const InputDecoration(labelText: 'Your name'),
                   ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: _advertising ? _stopAdvertising : null,
-                  child: const Text('Stop Advertising / Verified'),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _idController,
+                    readOnly: true,
+                    decoration: const InputDecoration(labelText: 'Your ID (from Firebase)'),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      ElevatedButton(
+                        onPressed: _advertising ? null : _startAdvertising,
+                        child: Text(
+                          _advertising ? 'Advertising...' : 'Start Advertising',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _advertising ? _stopAdvertising : null,
+                        child: const Text('Stop Advertising / Verified'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // This text now shows the original display format
+                  Text(
+                    'Advertising payload: ATS:${_idController.text}',
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
-            Text(
-              'Advertising payload: ${_classController.text}|${_nameController.text}',
-            ),
-            Text('Student ID: $_studentId'),
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
     );
   }
 }
+
 const String kPrimaryServiceUuidStr   = "0000180a-0000-1000-8000-00805f9b34fb";
 const String kServiceDataUuidStr      = "0000180a-0000-1000-8000-00805f9b34fd";
 
@@ -685,22 +696,29 @@ class ParsedAdvertisement {
   });
 
   static ParsedAdvertisement fromDiscoveredDevice(DiscoveredDevice d) {
-  
-  String? raw;
-  String? classId;
-  String? name;
-  String? sid;
+    String? raw;
+    String? classId;
+    String? name;
+    String? sid;
+    Uint8List? dataBytes;
 
-  // 1. Prefer the explicit serviceDataUuid you used in advertising
-    if (d.serviceData.isNotEmpty) {
-      Uint8List? dataBytes;
+    // --- NEW: Check manufacturerData first ---
+    // The student app is advertising with manufacturerData. The raw bytes are in
+    // d.manufacturerData. The first 2 bytes are the manufacturer ID, and the
+    // rest is the payload.
+    if (d.manufacturerData.isNotEmpty && d.manufacturerData.length > 2) {
+      // We skip the first 2 bytes (the manufacturer ID) to get the payload.
+      dataBytes = d.manufacturerData.sublist(2);
+    }
 
+    // --- FALLBACK: Check serviceData if manufacturerData is empty or fails ---
+    if (dataBytes == null && d.serviceData.isNotEmpty) {
       if (d.serviceData.containsKey(kServiceDataUuid)) {
         dataBytes = d.serviceData[kServiceDataUuid];
       } else if (d.serviceData.containsKey(kPrimaryServiceUuid)) {
         dataBytes = d.serviceData[kPrimaryServiceUuid];
       } else {
-        // fallback: first entry that decodes to ATS:
+        // Fallback to any service data that looks like ours
         for (final entry in d.serviceData.entries) {
           try {
             final test = utf8.decode(entry.value, allowMalformed: true).trim();
@@ -711,36 +729,31 @@ class ParsedAdvertisement {
           } catch (_) {}
         }
       }
+    }
 
-      if (dataBytes != null) {
-        try {
-          final decoded = utf8.decode(dataBytes, allowMalformed: true).trim();
-          debugPrint('🔍 serviceData decoded: $decoded');
-          if (decoded.startsWith('ATS:')) {
-            raw = decoded;
-            // Current format: ATS:<CLASS_ID>
-            // (If later you add |Name|ID:XYZ, this still works: first token after ATS:)
-            final body = decoded.substring(4);
-            final parts = body.split('|');
-            if (parts.isNotEmpty && parts.first.isNotEmpty) {
-              classId = parts.first;
-            }
-            // Optional future extensions:
-            if (parts.length > 1) name = parts[1];
-            if (parts.length > 2 && parts[2].startsWith('ID:')) {
-              sid = parts[2].substring(3);
-            }
+    if (dataBytes != null) {
+      try {
+        final decoded = utf8.decode(dataBytes, allowMalformed: true).trim();
+        debugPrint('🔍 Decoded advertisement data: $decoded');
+        if (decoded.startsWith('ATS:')) {
+          raw = decoded;
+          final body = decoded.substring(4);
+          final parts = body.split('|');
+          if (parts.isNotEmpty) {
+            // The first part is now treated as the student ID
+            sid = parts.first;
+            classId = parts.first; // Also assign to classId for compatibility
           }
-        } catch (e) {
-          debugPrint('⚠️ Error decoding serviceData: $e');
+          if (parts.length > 1) name = parts[1];
         }
+      } catch (e) {
+        debugPrint('⚠️ Error decoding advertisement data: $e');
       }
     }
 
-    // (No manufacturer parsing since you said you only use service data)
     return ParsedAdvertisement(
       rawManufacturerString: raw,
-      classId: classId,
+      classId: classId, // For backward compatibility with UI
       displayName: name ?? d.name,
       studentId: sid,
     );
