@@ -1,6 +1,6 @@
 # sih_new
 
-A new Flutter project.
+Flutter project.
 
 ## Getting Started
 
